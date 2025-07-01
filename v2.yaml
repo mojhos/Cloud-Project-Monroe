@@ -1,0 +1,142 @@
+
+Description:  base VPC + Wordpress installed on an EC2 + MySQL with RDS 
+Parameters:
+  LatestAmiId:
+    Description: AMI for Wordpess Instance (default is latest AmaLinux2023)
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+  DBName:
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    Default: 'CloudProject'
+    Description: The WordPress database name
+    MaxLength: '64'
+    MinLength: '1'
+    Type: String
+  DBPassword:
+    Description: The WordPress database admin account password
+    MaxLength: '41'
+    MinLength: '8'
+    Type: String
+    Default: 'CloudProject2025'
+  DBRootPassword:
+    Description: MySQL root password
+    MaxLength: '41'
+    MinLength: '8'
+    Type: String
+    Default: 'CloudProject2025'
+  DBUser:
+    Description: The WordPress database admin account username
+    Default: 'wordpress'
+    MaxLength: '16'
+    MinLength: '1'
+    Type: String
+  DBVersion:
+    Description: The version of MySQL to use
+    Default: "8.0.32"
+    Type: String
+  MultiAZ:
+    Description: Multi AZ
+    Type: "String"
+    Default: "False"
+    AllowedValues:
+      - "True"
+      - "False"
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.16.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: CloudProject
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: cloud-project-igw
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  RouteTableWeb: 
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: cloud-project-web-route
+  RouteTableWebDefaultIPv4: 
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTableWeb
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId:
+        Ref: InternetGateway
+  RouteTableAssociationWebA:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SubnetWEBA 
+      RouteTableId:
+        Ref: RouteTableWeb
+  SubnetDBA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.16.0.0/20
+      Tags:
+        - Key: Name
+          Value: subnet-db-a
+  SubnetDBB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: 10.16.32.0/20
+      Tags:
+        - Key: Name
+          Value: subnet-db-b
+  SubnetWEBA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.16.16.0/20
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: subnet-web-a
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties: 
+      DBSubnetGroupDescription:  rds subnet group
+      SubnetIds: 
+        - !Ref SubnetDBA
+        - !Ref SubnetDBB
+  DB:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      AllocatedStorage: "20"
+      DBInstanceClass: "db.t3.micro"
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      DBName: !Ref DBName
+      Engine: MySQL
+      EngineVersion: !Ref DBVersion
+      MasterUserPassword: !Ref DBPassword
+      MasterUsername: !Ref DBUser
+      MultiAZ: "False"
+      StorageType: gp2
+      Tags: 
+        - Key: Name
+          Value: "CloudProject-RDS-DB"
+Outputs:
+  dbhost:
+    Description: "RDS Endpoint Address"
+    Value: !GetAtt DB.Endpoint.Address
